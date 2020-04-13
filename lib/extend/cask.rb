@@ -20,6 +20,7 @@ module Cask
           :current      => versions,
           :outdated?    => cask.instance_of?(Cask) && !versions.include?(cask.version.to_s),
           :auto_updates => cask.auto_updates,
+          :mas          => false,
         }
       rescue CaskUnavailableError
         {
@@ -30,6 +31,7 @@ module Cask
           :current      => versions,
           :outdated?    => false,
           :auto_updates => false,
+          :mas          => false,
         }
       end
     end

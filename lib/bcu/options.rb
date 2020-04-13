@@ -19,6 +19,7 @@ module Bcu
     options.pin = nil
     options.unpin = nil
     options.interactive = false
+    options.include_mas = false
 
     parser = OptionParser.new do |opts|
       opts.banner = "Usage: brew cu [CASK] [options]"
@@ -81,6 +82,14 @@ module Bcu
 
       opts.on("--unpin CASK", "Cask to unpin") do |cask|
         options.unpin = cask
+      end
+
+      opts.on("--include-mas", "Include Mac AppStore applications") do
+        if IO.popen(%w(which mas)).read.empty?
+          onoe "In order to use --include-mas the mas-cli has to be installed. Please see the instructions here: https://github.com/mas-cli/mas"
+          exit 1
+        end
+        options.include_mas = true
       end
     end
 

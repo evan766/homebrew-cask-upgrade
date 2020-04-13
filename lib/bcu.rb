@@ -33,6 +33,7 @@ module Bcu
       ohai "Options"
       puts "Include auto-update (-a): #{Formatter.colorize(options.all, options.all ? "green" : "red")}"
       puts "Include latest (-f): #{Formatter.colorize(options.force, options.force ? "green" : "red")}"
+      puts "Include mac app store (--include-mas): #{Formatter.colorize(options.include_mas, options.include_mas ? "green" : "red")}" if options.include_mas
     end
 
     unless options.no_brew_update
@@ -73,49 +74,53 @@ module Bcu
     end
 
     outdated.each do |app|
-      if options.interactive
-        formatting = Formatter.formatting_for_app(state_info, app, options)
-        printf 'Do you want to upgrade "%<app>s" or [p]in it to exclude it from updates [y/p/N]? ', app: Formatter.colorize(app[:token], formatting[0])
-        input = STDIN.gets.strip
-
-        if input.casecmp("p").zero?
-          add_pin app[:token]
-        end
-        next unless input.casecmp("y").zero?
-      end
-
-      ohai "Upgrading #{app[:token]} to #{app[:version]}"
-      backup_metadata_folder = app[:cask].metadata_master_container_path.to_s.gsub(%r{/.*\/$/}, "") + "-bck/"
-
-      # Move the cask metadata container to backup folder
-      if options.verbose || File.exist?(app[:cask].metadata_master_container_path)
-        system "mv -f #{app[:cask].metadata_master_container_path} #{backup_metadata_folder}"
-      end
-
-      begin
-        # Force to install the latest version.
-        installation_successful = system "brew cask install #{options.install_options} #{app[:token]} --force " + verbose_flag
-      rescue
-        installation_successful = false
-      end
-
-      if installation_successful
-        # Remove the old versions.
-        app[:current].each do |version|
-          unless version == "latest"
-            system "rm -rf #{CASKROOM}/#{app[:token]}/#{Shellwords.escape(version)}"
-          end
-        end
-
-        # Clean up the cask metadata backup container if everything went well.
-        system "rm -rf #{backup_metadata_folder}"
-      elsif options.verbose || File.exist?(backup_metadata_folder)
-        # Put back the "old" metadata folder if error occured.
-        system "mv -f #{backup_metadata_folder} #{app[:cask].metadata_master_container_path}"
-      end
+      update app, options
     end
 
     system "brew cleanup " + verbose_flag if options.cleanup && cleanup_necessary
+  end
+
+  def self.update(app, options)
+    if options.interactive
+      formatting = Formatter.formatting_for_app(state_info, app, options)
+      printf 'Do you want to upgrade "%<app>s" or [p]in it to exclude it from updates [y/p/N]? ', app: Formatter.colorize(app[:token], formatting[0])
+      input = STDIN.gets.strip
+
+      if input.casecmp("p").zero?
+        add_pin app[:token]
+      end
+      return unless input.casecmp("y").zero?
+    end
+
+    ohai "Upgrading #{app[:token]} to #{app[:version]}"
+    backup_metadata_folder = app[:cask].metadata_master_container_path.to_s.gsub(%r{/.*\/$/}, "") + "-bck/"
+
+    # Move the cask metadata container to backup folder
+    if options.verbose || File.exist?(app[:cask].metadata_master_container_path)
+      system "mv -f #{app[:cask].metadata_master_container_path} #{backup_metadata_folder}"
+    end
+
+    begin
+      # Force to install the latest version.
+      installation_successful = system "brew cask install #{options.install_options} #{app[:token]} --force " + verbose_flag
+    rescue
+      installation_successful = false
+    end
+
+    if installation_successful
+      # Remove the old versions.
+      app[:current].each do |version|
+        unless version == "latest"
+          system "rm -rf #{CASKROOM}/#{app[:token]}/#{Shellwords.escape(version)}"
+        end
+      end
+
+      # Clean up the cask metadata backup container if everything went well.
+      system "rm -rf #{backup_metadata_folder}"
+    elsif options.verbose || File.exist?(backup_metadata_folder)
+      # Put back the "old" metadata folder if error occured.
+      system "mv -f #{backup_metadata_folder} #{app[:cask].metadata_master_container_path}"
+    end
   end
 
   def self.find_outdated_apps(quiet)
@@ -123,6 +128,9 @@ module Bcu
     state_info = Hash.new("")
 
     installed = Cask.installed_apps
+    if options.include_mas
+      include_mas_applications installed
+    end
 
     unless options.casks.empty?
       installed = installed.select do |app|
@@ -165,6 +173,29 @@ module Bcu
     Formatter.print_app_table(installed, state_info, options) unless quiet
 
     [outdated, state_info]
+  end
+
+  def self.include_mas_applications(installed)
+    result = IO.popen(%w(mas list)).read
+    mac_apps = result.split("\n")
+
+    mac_apps.each do |app|
+      data = app.split(/^(\d+) (.+) \((.+)\)$/)
+      mas_cask = {
+          :cask         => nil,
+          :name         => data[2],
+          :token        => data[2].downcase,
+          :version      => data[3],
+          :current      => [data[3]],
+          :outdated?    => false,
+          :auto_updates => true,
+          :mas          => true,
+          :mas_id       => data[1],
+      }
+      installed.push(mas_cask)
+    end
+
+    installed.sort_by! { |cask| cask[:token] }
   end
 
   def self.print_install_empty_message(cask_searched)
